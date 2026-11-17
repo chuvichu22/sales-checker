@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>사원별 매출 계산</title>
+<style>
+:root{--bg:#f2f4f2;--card:#fff;--tx:#1c2622;--mut:#66726d;--ln:#dde3df;--ac:#1f6f5c;--acbg:#e3f1ec;--warn:#b4491f}
+@media(prefers-color-scheme:dark){:root{--bg:#121816;--card:#1b2320;--tx:#e6ece9;--mut:#93a09a;--ln:#2b3631;--ac:#5fc4a5;--acbg:#1f3029;--warn:#ff9c72}}
+*{box-sizing:border-box}
+body{margin:0;padding:12px;background:var(--bg);color:var(--tx);font:15px/1.5 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif}
+main{max-width:860px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 12px}
+h2{font-size:15px;margin:0 0 8px}
+section{background:var(--card);border:1px solid var(--ln);border-radius:10px;padding:12px;margin-bottom:12px}
+textarea{width:100%;height:120px;border:1px solid var(--ln);border-radius:8px;padding:8px;background:var(--bg);color:var(--tx);font:13px/1.4 monospace;resize:vertical}
+button{border:0;border-radius:8px;padding:8px 14px;background:var(--ac);color:var(--bg);font:inherit;font-weight:600;cursor:pointer}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.hint{color:var(--mut);font-size:13px;margin:6px 0 0}
+.err{color:var(--warn);font-size:14px;margin:6px 0 0}
+.grid{overflow-x:auto}
+.grid table{width:auto;min-width:100%}
+.grid th{font-weight:600;font-size:13px;color:var(--mut);padding:4px 10px;text-align:center;white-space:nowrap}
+.grid td{padding:5px 10px;text-align:center}
+.grid td:first-child,.grid th:first-child{text-align:left;padding-left:0}
+.grid input{width:20px;height:20px;accent-color:var(--ac)}
+.items{display:flex;flex-wrap:wrap;gap:8px}
+.items label{display:flex;align-items:center;gap:6px;border:1px solid var(--ln);border-radius:8px;padding:6px 10px;cursor:pointer}
+.items input{width:18px;height:18px;accent-color:var(--ac)}
+.items label.on{background:var(--acbg);border-color:var(--ac)}
+.day{border:1px solid var(--ln);border-radius:10px;padding:10px;margin-bottom:12px}
+.dayhd{display:flex;justify-content:space-between;align-items:baseline;font-size:17px;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid var(--tx)}
+.grp{border-top:1px solid var(--ln);padding:8px 0}
+.grp.f{border-top:0}
+.hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hd b{font-size:16px}
+.tot{font-size:18px;font-weight:700;color:var(--ac)}
+.meta{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+.grp table{margin-top:4px}
+.grp td{padding:3px 0}
+td.r{text-align:right;white-space:nowrap}
+.w{color:var(--warn)}
+.badge{font-size:12px;font-weight:600;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:0 6px;margin-left:4px}
+.al{border:1px solid var(--ln);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:14px}
+.al.bad{border-color:var(--warn);color:var(--warn)}
+input[type=number]{width:110px;border:1px solid var(--ln);border-radius:6px;padding:4px 6px;background:var(--bg);color:var(--tx);font:inherit}
+.bar{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<main>
+<h1>사원별 매출 계산</h1>
+
+<section>
+<h2>1. 시트 데이터 붙여넣기</h2>
+<textarea id="src" placeholder="엑셀에서 헤더(첫 줄)까지 포함해서 복사 → 여기에 붙여넣기"></textarea>
+<p class="hint">필요한 열: 거래처, 조사일, 사번, 성명, 품목군, 판매수량, 가격</p>
+<p class="err" id="err"></p>
+</section>
+
+<section id="setSec" hidden>
+<h2>2. 1+1 행사 품목 체크</h2>
+<div class="items" id="grid"></div>
+<p class="hint">체크한 품목은 모든 날짜에 올림(판매수량 ÷ 2) × 가격으로 계산돼요. 체크는 이 브라우저에 저장돼요.</p>
+</section>
+
+<section id="resSec" hidden>
+<h2>3. 일자별 매출</h2>
+<div class="bar" style="margin:0 0 10px"><label>하루 기준 금액 <input id="th" type="number" step="10000" min="0"></label></div>
+<div id="res"></div>
+<div class="bar"><button id="copy">결과 복사</button><span class="hint" id="cmsg"></span></div>
+<textarea id="fb" readonly hidden style="margin-top:8px"></textarea>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('ko-KR');
+const num=v=>{const n=parseFloat(String(v||'').replace(/[^0-9.\-]/g,''));return isNaN(n)?0:n};
+const DOW=['일','월','화','수','목','금','토'];
+function dlabel(d){const x=new Date(d+'T00:00:00');return isNaN(x)?d:d.slice(5).replace('-','/')+' '+DOW[x.getDay()]}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function groupBy(arr,fn){const g={};arr.forEach(r=>{const k=fn(r);(g[k]=g[k]||[]).push(r)});return g}
+
+let ONE={};
+try{ONE=JSON.parse(localStorage.getItem('oneplus')||'{}')}catch(e){}
+function saveOne(){try{localStorage.setItem('oneplus',JSON.stringify(ONE))}catch(e){}}
+let TH=160000;
+try{const v=parseInt(localStorage.getItem('th'));if(v>0)TH=v}catch(e){}
+
+let rows=[],dates=[],itemNames=[];
+const NEED=['거래처','조사일','사번','성명','품목군','판매수량','가격'];
+
+function parse(){
+  rows=[];dates=[];itemNames=[];$('err').textContent='';
+  const lines=$('src').value.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)return;
+  const h=lines[0].split('\t').map(x=>x.trim());
+  const ix={};
+  const miss=NEED.filter(n=>{ix[n]=h.indexOf(n);return ix[n]<0});
+  if(miss.length){$('err').textContent='못 찾은 열: '+miss.join(', ')+' (헤더 줄까지 같이 복사했는지 확인해줘)';return}
+  for(let i=1;i<lines.length;i++){
+    const c=lines[i].split('\t');
+    const item=(c[ix['품목군']]||'').trim();
+    if(!item)continue;
+    rows.push({store:(c[ix['거래처']]||'').trim(),date:(c[ix['조사일']]||'').trim(),id:(c[ix['사번']]||'').trim(),name:(c[ix['성명']]||'').trim(),item,qty:num(c[ix['판매수량']]),price:num(c[ix['가격']])});
+  }
+  dates=[...new Set(rows.map(r=>r.date))].sort();
+  itemNames=[...new Set(rows.map(r=>r.item))];
+}
+
+const okey=(d,i)=>i;
+function amount(r){const q=ONE[okey(r.date,r.item)]?Math.ceil(r.qty/2):r.qty;return q*r.price}
+function sumAmt(l){return l.reduce((s,r)=>s+amount(r),0)}
+function suspect(r){return (r.price>0&&r.price<100)||r.qty>=1000||(r.price>0&&r.qty>r.price)}
+
+function renderItems(){
+  $('setSec').hidden=!rows.length;
+  if(!rows.length)return;
+  $('grid').innerHTML='';
+  itemNames.forEach(n=>{
+    const l=document.createElement('label');
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=!!ONE[n];
+    l.className=cb.checked?'on':'';
+    cb.onchange=()=>{ONE[n]=cb.checked;saveOne();renderItems();renderRes()};
+    l.append(cb,document.createTextNode(n+' 1+1'));
+    $('grid').append(l);
+  });
+}
+
+let copyText='';
+function renderRes(){
+  $('resSec').hidden=!rows.length;
+  if(!rows.length)return;
+  $('th').value=TH;
+  let html='',txt='일자\t거래처\t성명\t금액\n';
+  dates.forEach(d=>{
+    const eg=groupBy(rows.filter(r=>r.date===d),r=>r.id+'|'+r.store);
+    const ks=Object.keys(eg).sort((a,b)=>{const x=eg[a][0],y=eg[b][0];return x.store.localeCompare(y.store,'ko')||x.name.localeCompare(y.name,'ko')});
+    const sus=[],zero=[],low=[];
+    let dayTot=0,body='';
+    ks.forEach((k,idx)=>{
+      const list=eg[k],f=list[0];
+      const tot=sumAmt(list),qs=list.reduce((s,r)=>s+r.qty,0);
+      dayTot+=tot;
+      list.forEach(r=>{if(suspect(r))sus.push(f.name+' · '+f.store+' · '+r.item+' (수량 '+fmt(r.qty)+', 가격 '+fmt(r.price)+')')});
+      let bd='';
+      if(qs===0){zero.push(f.name+' · '+f.store);bd=' <span class="badge">0개</span>'}
+      else if(tot<TH){low.push(f.name+' · '+f.store+' — '+fmt(tot)+'원');bd=' <span class="badge">기준 미만</span>'}
+      txt+=[d,f.store,f.name,tot].join('\t')+'\n';
+      body+='<div class="grp'+(idx===0?' f':'')+'"><div class="hd"><b>'+esc(f.name)+bd+'</b><span class="tot">'+fmt(tot)+'원</span></div><div class="meta">'+esc(f.store)+'</div><table>';
+      list.forEach(r=>{
+        const one=ONE[okey(r.date,r.item)];
+        const warn=r.qty>0&&!r.price,s=suspect(r);
+        body+='<tr><td>'+esc(r.item)+(one?' (1+1)':'')+'</td><td class="r meta">'+r.qty+'개 × '+fmt(r.price)+'</td><td class="r'+(warn||s?' w':'')+'">'+(warn?'가격 없음':(s?'⚠ ':'')+fmt(amount(r)))+'</td></tr>';
+      });
+      body+='</table></div>';
+    });
+    const box=(t,a,c)=>a.length?'<div class="al '+c+'"><b>'+t+' ('+a.length+')</b><br>'+a.map(esc).join('<br>')+'</div>':'';
+    html+='<div class="day"><div class="dayhd"><b>'+esc(dlabel(d))+'</b><span class="tot">'+fmt(dayTot)+'원</span></div>'
+      +box('수량/가격 뒤바뀜 의심',sus,'bad')+box('0개 판매',zero,'')+box(fmt(TH)+'원 미만',low,'')+body+'</div>';
+  });
+  $('res').innerHTML=html;
+  copyText=txt;
+}
+
+function run(){parse();renderItems();renderRes()}
+$('src').addEventListener('input',run);
+function doCopy(text){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=text;ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);ta.focus();ta.select();
+    const ok=document.execCommand('copy');ta.remove();
+    return ok;
+  }catch(e){return false}
+}
+$('copy').onclick=async()=>{
+  let ok=doCopy(copyText);
+  if(!ok){try{await navigator.clipboard.writeText(copyText);ok=true}catch(e){}}
+  if(오케이){$('cmsg').textContent='복사됨';$('fb').hidden=true}
+  else{$('cmsg').textContent='자동 복사가 막혔어. 아래 글을 전체 선택해서 복사해줘';$('fb').hidden=false;$('fb').value=copyText;$('fb').focus();$('fb').select()}
+};
+$('th').onchange=()=>{const v=parseInt($('th').value);if(v>0){TH=v;try{localStorage.setItem('th',String(v))}catch(e){}}renderRes()};
+</script>
+</body>
+</html>
