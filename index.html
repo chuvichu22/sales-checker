@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>사원별 매출 계산</title>
+<title>세일즈체커</title>
 <style>
 :root{--bg:#f2f4f2;--card:#fff;--tx:#1c2622;--mut:#66726d;--ln:#dde3df;--ac:#1f6f5c;--acbg:#e3f1ec;--warn:#b4491f}
 @media(prefers-color-scheme:dark){:root{--bg:#121816;--card:#1b2320;--tx:#e6ece9;--mut:#93a09a;--ln:#2b3631;--ac:#5fc4a5;--acbg:#1f3029;--warn:#ff9c72}}
@@ -50,7 +50,7 @@ input[type=number]{width:110px;border:1px solid var(--ln);border-radius:6px;padd
 </head>
 <body>
 <main>
-<h1>사원별 매출 계산</h1>
+<h1>세일즈체커</h1>
 
 <section>
 <h2>1. 시트 데이터 붙여넣기</h2>
@@ -68,6 +68,7 @@ input[type=number]{width:110px;border:1px solid var(--ln);border-radius:6px;padd
 <section id="resSec" hidden>
 <h2>3. 일자별 매출</h2>
 <div class="bar" style="margin:0 0 10px"><label>하루 기준 금액 <input id="th" type="number" step="10000" min="0"></label></div>
+<div id="lowBox"></div>
 <div id="res"></div>
 <div class="bar"><button id="copy">결과 복사</button><span class="hint" id="cmsg"></span></div>
 <textarea id="fb" readonly hidden style="margin-top:8px"></textarea>
@@ -129,27 +130,31 @@ function renderItems(){
   });
 }
 
-let copyText='';
+let copyText='',lowText='';
+const isDisp=l=>l.every(r=>r.item.includes('진열'));
 function renderRes(){
   $('resSec').hidden=!rows.length;
   if(!rows.length)return;
   $('th').value=TH;
   let html='',txt='일자\t거래처\t성명\t금액\n';
+  const lowAll=[];
   dates.forEach(d=>{
     const eg=groupBy(rows.filter(r=>r.date===d),r=>r.id+'|'+r.store);
     const ks=Object.keys(eg).sort((a,b)=>{const x=eg[a][0],y=eg[b][0];return x.store.localeCompare(y.store,'ko')||x.name.localeCompare(y.name,'ko')});
-    const sus=[],zero=[],low=[];
-    let dayTot=0,body='';
-    ks.forEach((k,idx)=>{
+    const sus=[],zero=[],low=[],disp=[];
+    let dayTot=0,body='',first=true;
+    ks.forEach(k=>{
       const list=eg[k],f=list[0];
+      if(isDisp(list)){disp.push(f.name);return}
       const tot=sumAmt(list),qs=list.reduce((s,r)=>s+r.qty,0);
       dayTot+=tot;
       list.forEach(r=>{if(suspect(r))sus.push(f.name+' · '+f.store+' · '+r.item+' (수량 '+fmt(r.qty)+', 가격 '+fmt(r.price)+')')});
       let bd='';
-      if(qs===0){zero.push(f.name+' · '+f.store);bd=' <span class="badge">0개</span>'}
-      else if(tot<TH){low.push(f.name+' · '+f.store+' — '+fmt(tot)+'원');bd=' <span class="badge">기준 미만</span>'}
+      if(qs===0){zero.push(f.name+' · '+f.store);bd=' <span class="badge">0개</span>';lowAll.push({d,store:f.store,name:f.name,tot})}
+      else if(tot<TH){low.push(f.name+' · '+f.store+' — '+fmt(tot)+'원');bd=' <span class="badge">기준 미만</span>';lowAll.push({d,store:f.store,name:f.name,tot})}
       txt+=[d,f.store,f.name,tot].join('\t')+'\n';
-      body+='<div class="grp'+(idx===0?' f':'')+'"><div class="hd"><b>'+esc(f.name)+bd+'</b><span class="tot">'+fmt(tot)+'원</span></div><div class="meta">'+esc(f.store)+'</div><table>';
+      body+='<div class="grp'+(first?' f':'')+'"><div class="hd"><b>'+esc(f.name)+bd+'</b><span class="tot">'+fmt(tot)+'원</span></div><div class="meta">'+esc(f.store)+'</div><table>';
+      first=false;
       list.forEach(r=>{
         const one=ONE[okey(r.date,r.item)];
         const warn=r.qty>0&&!r.price,s=suspect(r);
@@ -159,10 +164,22 @@ function renderRes(){
     });
     const box=(t,a,c)=>a.length?'<div class="al '+c+'"><b>'+t+' ('+a.length+')</b><br>'+a.map(esc).join('<br>')+'</div>':'';
     html+='<div class="day"><div class="dayhd"><b>'+esc(dlabel(d))+'</b><span class="tot">'+fmt(dayTot)+'원</span></div>'
-      +box('수량/가격 뒤바뀜 의심',sus,'bad')+box('0개 판매',zero,'')+box(fmt(TH)+'원 미만',low,'')+body+'</div>';
+      +box('수량/가격 뒤바뀜 의심',sus,'bad')+box('0개 판매',zero,'')+box(fmt(TH)+'원 미만',low,'')+body
+      +(disp.length?'<div class="meta" style="margin-top:8px">진열근무 '+disp.length+'명 (제외): '+esc(disp.join(', '))+'</div>':'')+'</div>';
   });
   $('res').innerHTML=html;
   copyText=txt;
+  // 여러 날일 때: 16만원 미만(행사일만) 모아서 복사
+  let lb='';lowText='';
+  if(dates.length>1&&lowAll.length){
+    lowAll.sort((a,b)=>a.name.localeCompare(b.name,'ko')||a.d.localeCompare(b.d));
+    lowText='일자\t거래처\t성명\t금액\n'+lowAll.map(x=>[x.d,x.store,x.name,x.tot].join('\t')).join('\n')+'\n';
+    lb='<div class="al"><b>'+esc(fmt(TH))+'원 미만 · 행사일만 ('+lowAll.length+'건)</b><br>'
+      +lowAll.map(x=>esc(x.name+' · '+dlabel(x.d)+' · '+x.store+' · '+fmt(x.tot)+'원')).join('<br>')+'</div>'
+      +'<div class="bar" style="margin:0 0 14px"><button id="copyLow">미만 목록 복사</button><span class="hint" id="lowMsg"></span></div>';
+  }
+  $('lowBox').innerHTML=lb;
+  if($('copyLow'))$('copyLow').onclick=()=>copyOut(lowText,$('lowMsg'));
 }
 
 function run(){parse();renderItems();renderRes()}
@@ -176,12 +193,13 @@ function doCopy(text){
     return ok;
   }catch(e){return false}
 }
-$('copy').onclick=async()=>{
-  let ok=doCopy(copyText);
-  if(!ok){try{await navigator.clipboard.writeText(copyText);ok=true}catch(e){}}
-  if(오케이){$('cmsg').textContent='복사됨';$('fb').hidden=true}
-  else{$('cmsg').textContent='자동 복사가 막혔어. 아래 글을 전체 선택해서 복사해줘';$('fb').hidden=false;$('fb').value=copyText;$('fb').focus();$('fb').select()}
-};
+async function copyOut(text,msg){
+  let ok=doCopy(text);
+  if(!ok){try{await navigator.clipboard.writeText(text);ok=true}catch(e){}}
+  if(오케이){msg.textContent='복사됨';$('fb').hidden=true}
+  else{msg.textContent='자동 복사가 막혔어. 아래 칸 내용을 전체 선택해서 복사해줘';msg.parentNode.after($('fb'));$('fb').hidden=false;$('fb').value=text;$('fb').focus();$('fb').select()}
+}
+$('copy').onclick=()=>copyOut(copyText,$('cmsg'));
 $('th').onchange=()=>{const v=parseInt($('th').value);if(v>0){TH=v;try{localStorage.setItem('th',String(v))}catch(e){}}renderRes()};
 </script>
 </body>
